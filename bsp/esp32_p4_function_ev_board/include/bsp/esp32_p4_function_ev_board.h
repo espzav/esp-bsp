@@ -17,6 +17,7 @@
 #include "driver/sdmmc_host.h"
 #include "bsp/config.h"
 #include "bsp/display.h"
+#include "sdkconfig.h"
 
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
 #include "lvgl.h"
@@ -40,12 +41,21 @@
  *  ESP-BOX pinout
  **************************************************************************************************/
 /* I2C */
-#define BSP_I2C_SCL           (GPIO_NUM_34)
-#define BSP_I2C_SDA           (GPIO_NUM_31)
+#define BSP_I2C_SCL           (GPIO_NUM_8)
+#define BSP_I2C_SDA           (GPIO_NUM_7)
 
 /* Display */
-#define BSP_LCD_BACKLIGHT     (GPIO_NUM_23)
+#if CONFIG_BSP_LCD_TYPE_1024_600
+#define BSP_LCD_BACKLIGHT     (GPIO_NUM_26)
+#define BSP_LCD_RST           (GPIO_NUM_27)
+#define BSP_LCD_TOUCH_RST     (GPIO_NUM_NC)
 #define BSP_LCD_TOUCH_INT     (GPIO_NUM_NC)
+#else
+#define BSP_LCD_BACKLIGHT     (GPIO_NUM_23)
+#define BSP_LCD_RST           (GPIO_NUM_NC)
+#define BSP_LCD_TOUCH_RST     (GPIO_NUM_NC)
+#define BSP_LCD_TOUCH_INT     (GPIO_NUM_NC)
+#endif
 
 /* uSD card */
 #define BSP_SD_D0             (GPIO_NUM_39)
@@ -184,7 +194,7 @@ esp_err_t bsp_sdcard_unmount(void);
 
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
 
-#define BSP_LCD_DRAW_BUFF_SIZE     (BSP_LCD_H_RES * 100) // Frame buffer size in pixels
+#define BSP_LCD_DRAW_BUFF_SIZE     (BSP_LCD_H_RES * 50) // Frame buffer size in pixels
 #define BSP_LCD_DRAW_BUFF_DOUBLE   (0)
 
 /**

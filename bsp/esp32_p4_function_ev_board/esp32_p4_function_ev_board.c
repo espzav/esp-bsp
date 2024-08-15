@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include "sdkconfig.h"
 #include "driver/gpio.h"
 #include "driver/ledc.h"
 #include "esp_err.h"
@@ -13,9 +14,16 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_ldo_regulator.h"
-#include "esp_lcd_ili9881c.h"
 #include "esp_vfs_fat.h"
 #include "usb/usb_host.h"
+#include "sd_pwr_ctrl_by_on_chip_ldo.h"
+
+
+#if CONFIG_BSP_LCD_TYPE_1024_600
+#include "esp_lcd_ek79007.h"
+#else
+#include "esp_lcd_ili9881c.h"
+#endif
 
 #include "bsp/esp32_p4_function_ev_board.h"
 #include "bsp/display.h"
@@ -30,7 +38,6 @@ static lv_indev_t *disp_indev = NULL;
 #endif // (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
 
 sdmmc_card_t *bsp_sdcard = NULL;    // Global uSD card handler
-static esp_lcd_touch_handle_t tp;   // LCD touch handle
 static bool i2c_initialized = false;
 static TaskHandle_t usb_host_task;  // USB Host Library task
 
@@ -78,6 +85,18 @@ esp_err_t bsp_sdcard_mount(void)
 
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
+
+    sd_pwr_ctrl_ldo_config_t ldo_config = {
+        .ldo_chan_id = 4,
+    };
+    sd_pwr_ctrl_handle_t pwr_ctrl_handle = NULL;
+    esp_err_t ret = sd_pwr_ctrl_new_on_chip_ldo(&ldo_config, &pwr_ctrl_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create a new on-chip LDO power control driver");
+        return ret;
+    }
+    host.pwr_ctrl_handle = pwr_ctrl_handle;
+
     const sdmmc_slot_config_t slot_config = {
         .clk = BSP_SD_CLK,
         .cmd = BSP_SD_CMD,
@@ -139,7 +158,7 @@ esp_err_t bsp_spiffs_unmount(void)
 // Bit number used to represent command and parameter
 #define LCD_LEDC_CH            CONFIG_BSP_DISPLAY_BRIGHTNESS_LEDC_CH
 
-static esp_err_t bsp_display_brightness_init(void)
+esp_err_t bsp_display_brightness_init(void)
 {
     // Setup LEDC peripheral for PWM backlight control
     const ledc_channel_config_t LCD_backlight_channel = {
@@ -245,29 +264,69 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
     };
     ESP_GOTO_ON_ERROR(esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io), err, TAG, "New panel IO failed");
 
+    esp_lcd_panel_handle_t ctrl_panel = NULL;
+    esp_lcd_panel_handle_t disp_panel = NULL;
+#if CONFIG_BSP_LCD_TYPE_1024_600
+    // create EK79007 control panel
+    ESP_LOGI(TAG, "Install EK79007 LCD control panel");
+
+#if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
+    const esp_lcd_dpi_panel_config_t dpi_config = EK79007_1024_600_PANEL_60HZ_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB888);
+#else
+    const esp_lcd_dpi_panel_config_t dpi_config = EK79007_1024_600_PANEL_60HZ_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
+#endif
+    ek79007_vendor_config_t vendor_config = {
+        .flags = {
+            .use_mipi_interface = 1,
+        },
+        .mipi_config = {
+            .dsi_bus = mipi_dsi_bus,
+            .dpi_config = &dpi_config,
+        },
+    };
+    esp_lcd_panel_dev_config_t lcd_dev_config = {
+        .bits_per_pixel = 16,
+        .rgb_ele_order = BSP_LCD_COLOR_SPACE,
+        .reset_gpio_num = BSP_LCD_RST,
+        .vendor_config = &vendor_config,
+    };
+    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_ek79007(io, &lcd_dev_config, &disp_panel), err, TAG, "New LCD panel EK79007 failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(disp_panel), err, TAG, "LCD panel reset failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_init(disp_panel), err, TAG, "LCD panel init failed");
+
+    /* Return all handles */
+    ret_handles->io = io;
+    ret_handles->mipi_dsi_bus = mipi_dsi_bus;
+    ret_handles->panel = disp_panel;
+    ret_handles->control = NULL;
+
+#else
     // create ILI9881C control panel
-    esp_lcd_panel_handle_t ili9881c_ctrl_panel;
+    ESP_LOGI(TAG, "Install ILI9881C LCD control panel");
     esp_lcd_panel_dev_config_t lcd_dev_config = {
         .bits_per_pixel = 16,
         .rgb_ele_order = BSP_LCD_COLOR_SPACE,
         .reset_gpio_num = -1,
     };
-    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_ili9881c(io, &lcd_dev_config, &ili9881c_ctrl_panel), err, TAG, "New LCD panel ILI9881C failed");
-    ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(ili9881c_ctrl_panel), err, TAG, "LCD panel reset failed");
-    ESP_GOTO_ON_ERROR(esp_lcd_panel_init(ili9881c_ctrl_panel), err, TAG, "LCD panel init failed");
-    ESP_GOTO_ON_ERROR(esp_lcd_panel_disp_on_off(ili9881c_ctrl_panel, true), err, TAG, "LCD panel ON failed");
-    esp_lcd_panel_mirror(ili9881c_ctrl_panel, true, true);
+    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_ili9881c(io, &lcd_dev_config, &ctrl_panel), err, TAG, "New LCD panel ILI9881C failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(ctrl_panel), err, TAG, "LCD panel reset failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_init(ctrl_panel), err, TAG, "LCD panel init failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_disp_on_off(ctrl_panel, true), err, TAG, "LCD panel ON failed");
+    esp_lcd_panel_mirror(ctrl_panel, true, true);
 
     ESP_LOGI(TAG, "Install MIPI DSI LCD data panel");
-    esp_lcd_panel_handle_t ili9881c_panel;
     esp_lcd_dpi_panel_config_t dpi_config = {
         .virtual_channel = 0,
         .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
         .dpi_clock_freq_mhz = BSP_LCD_PIXEL_CLOCK_MHZ,
+#if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
+        .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB888,
+#else
         .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,
+#endif
         .video_timing = {
-            .h_size = BSP_LCD_V_RES,
-            .v_size = BSP_LCD_H_RES,
+            .h_size = BSP_LCD_H_RES,
+            .v_size = BSP_LCD_V_RES,
             .hsync_back_porch = BSP_LCD_MIPI_DSI_LCD_HBP,
             .hsync_pulse_width = BSP_LCD_MIPI_DSI_LCD_HSYNC,
             .hsync_front_porch = BSP_LCD_MIPI_DSI_LCD_HFP,
@@ -277,25 +336,26 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
         },
         .flags.use_dma2d = true,
     };
-    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_dpi(mipi_dsi_bus, &dpi_config, &ili9881c_panel), err, TAG, "New panel DPI failed");
-    ESP_GOTO_ON_ERROR(esp_lcd_panel_init(ili9881c_panel), err, TAG, "New panel DPI init failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_dpi(mipi_dsi_bus, &dpi_config, &disp_panel), err, TAG, "New panel DPI failed");
+    ESP_GOTO_ON_ERROR(esp_lcd_panel_init(disp_panel), err, TAG, "New panel DPI init failed");
 
     /* Return all handles */
     ret_handles->io = io;
     ret_handles->mipi_dsi_bus = mipi_dsi_bus;
-    ret_handles->panel = ili9881c_panel;
-    ret_handles->control = ili9881c_ctrl_panel;
+    ret_handles->panel = disp_panel;
+    ret_handles->control = ctrl_panel;
+#endif
 
     ESP_LOGI(TAG, "Display initialized");
 
     return ret;
 
 err:
-    if (ili9881c_panel) {
-        esp_lcd_panel_del(ili9881c_panel);
+    if (disp_panel) {
+        esp_lcd_panel_del(disp_panel);
     }
-    if (ili9881c_ctrl_panel) {
-        esp_lcd_panel_del(ili9881c_ctrl_panel);
+    if (ctrl_panel) {
+        esp_lcd_panel_del(ctrl_panel);
     }
     if (io) {
         esp_lcd_panel_io_del(io);
@@ -315,7 +375,7 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config, esp_lcd_touch_handle_t
     const esp_lcd_touch_config_t tp_cfg = {
         .x_max = BSP_LCD_H_RES,
         .y_max = BSP_LCD_V_RES,
-        .rst_gpio_num = GPIO_NUM_NC, // Shared with LCD reset
+        .rst_gpio_num = BSP_LCD_TOUCH_RST, // Shared with LCD reset
         .int_gpio_num = BSP_LCD_TOUCH_INT,
         .levels = {
             .reset = 0,
@@ -323,8 +383,13 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config, esp_lcd_touch_handle_t
         },
         .flags = {
             .swap_xy = 0,
+#if CONFIG_BSP_LCD_TYPE_1024_600
+            .mirror_x = 1,
+            .mirror_y = 1,
+#else
             .mirror_x = 0,
             .mirror_y = 0,
+#endif
         },
     };
     esp_lcd_panel_io_handle_t tp_io_handle = NULL;
@@ -348,8 +413,8 @@ static lv_display_t *bsp_display_lcd_init(const bsp_display_cfg_t *cfg)
         .control_handle = lcd_panels.control,
         .buffer_size = cfg->buffer_size,
         .double_buffer = cfg->double_buffer,
-        .hres = BSP_LCD_V_RES,
-        .vres = BSP_LCD_H_RES,
+        .hres = BSP_LCD_H_RES,
+        .vres = BSP_LCD_V_RES,
         .monochrome = false,
         /* Rotation values must be same as used in esp_lcd for initial settings of the screen */
         .rotation = {
@@ -357,10 +422,20 @@ static lv_display_t *bsp_display_lcd_init(const bsp_display_cfg_t *cfg)
             .mirror_x = true,
             .mirror_y = true,
         },
+#if LVGL_VERSION_MAJOR >= 9
+#if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
+        .color_format = LV_COLOR_FORMAT_RGB888,
+#else
+        .color_format = LV_COLOR_FORMAT_RGB565,
+#endif
+#endif
         .flags = {
             .buff_dma = cfg->flags.buff_dma,
             .buff_spiram = cfg->flags.buff_spiram,
+#if LVGL_VERSION_MAJOR >= 9
             .swap_bytes = (BSP_LCD_BIGENDIAN ? true : false),
+#endif
+            .sw_rotate = cfg->flags.sw_rotate, /* Only SW rotation is supported for 90° and 270° */
         }
     };
 
@@ -369,6 +444,7 @@ static lv_display_t *bsp_display_lcd_init(const bsp_display_cfg_t *cfg)
 
 static lv_indev_t *bsp_display_indev_init(lv_display_t *disp)
 {
+    esp_lcd_touch_handle_t tp;
     BSP_ERROR_CHECK_RETURN_NULL(bsp_touch_new(NULL, &tp));
     assert(tp);
 
@@ -388,8 +464,13 @@ lv_display_t *bsp_display_start(void)
         .buffer_size = BSP_LCD_DRAW_BUFF_SIZE,
         .double_buffer = BSP_LCD_DRAW_BUFF_DOUBLE,
         .flags = {
+#if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
+            .buff_dma = false,
+#else
             .buff_dma = true,
+#endif
             .buff_spiram = false,
+            .sw_rotate = true,
         }
     };
     return bsp_display_start_with_config(&cfg);

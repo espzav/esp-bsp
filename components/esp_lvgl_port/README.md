@@ -1,6 +1,7 @@
 # LVGL ESP Portation
 
 [![Component Registry](https://components.espressif.com/components/espressif/esp_lvgl_port/badge.svg)](https://components.espressif.com/components/espressif/esp_lvgl_port)
+![maintenance-status](https://img.shields.io/badge/maintenance-actively--developed-brightgreen.svg)
 
 This component helps with using LVGL with Espressif's LCD and touch drivers. It can be used with any project with LCD display.
 
@@ -17,10 +18,7 @@ This component helps with using LVGL with Espressif's LCD and touch drivers. It 
 
 ## LVGL Version
 
-> [!WARNING]
-> LVGL9 is not stable and it not recommended to use it.
-
-This component supports **LVGL8** and **LVGL9**. By default, it selects the latest LVGL version. If you want to use a specific version (e.g. latest LVGL8), you can easily put into `idf_component.yml` in your project like this:
+This component supports **LVGL8** and **LVGL9**. By default, it selects the latest LVGL version. If you want to use a specific version (e.g. latest LVGL8), you can easily define this requirement in `idf_component.yml` in your project like this:
 
 ```
   lvgl/lvgl:
@@ -30,7 +28,7 @@ This component supports **LVGL8** and **LVGL9**. By default, it selects the l
 
 ### LVGL Version Compatibility
 
-This component is fully compatible with LVGL version 9. All types and functions are used from LVGL9. Some LVGL9 types are not supported in LVGL8 and there are retyping in [`esp_lvgl_port_compatibility.h`](include/esp_lvgl_port_compatibility.h) header file. **Please, be aware, that some draw and object functions are not compatible between LVGL8 and LVGL9.**
+This component is fully compatible with LVGL version 9. All types and functions are used from LVGL9. Some LVGL9 types are not supported in LVGL8 and there are retyped in [`esp_lvgl_port_compatibility.h`](include/esp_lvgl_port_compatibility.h) header file. **Please, be aware, that some draw and object functions are not compatible between LVGL8 and LVGL9.**
 
 ## Usage
 
@@ -265,8 +263,8 @@ Display rotation can be changed at runtime.
     lv_disp_set_rotation(disp_handle, LV_DISP_ROT_90);
 ```
 
-> [!WARNING]
-> Software rotation is available only in LVGL 8.
+> [!NOTE]
+> This feature consume more RAM.
 
 > [!NOTE]
 > During the hardware rotating, the component call [`esp_lcd`](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/peripherals/lcd.html) API. When using software rotation, you cannot use neither `direct_mode` nor `full_refresh` in the driver. See [LVGL documentation](https://docs.lvgl.io/8.3/porting/display.html?highlight=sw_rotate) for more info.
