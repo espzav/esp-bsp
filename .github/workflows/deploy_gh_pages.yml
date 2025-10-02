@@ -3,7 +3,6 @@ name: Deploy GitHub Pages
 on:
   workflow_run:
     workflows:
-      - Build examples for Launchpad
       - Release Checker
     types:
       - completed

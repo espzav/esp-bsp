@@ -1,11 +1,11 @@
 name: Release Checker
 
 on:
-  push:
-      branches:
-      - master
-  workflow_dispatch:  # can be run manually
-
+  workflow_run:
+    workflows:
+      - Build examples for Launchpad
+    types:
+      - completed
 
 jobs:
   build-and-deploy:
