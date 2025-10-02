@@ -85,21 +85,22 @@ jobs:
           name: built_files
           path: binaries/
 
-      - name: Upload built files to gh pages
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: binaries/
-
       - name: Download built files
         uses: actions/download-artifact@v4
         with:
           name: release_checker
           path: site/
 
-      - name: Upload file to gh pages
+      - name: Prepare combined site
+        run: |
+          mkdir pages
+          cp -r binaries/* pages/
+          cp -r site/* pages/
+
+      - name: Upload combined site to GitHub Pages
         uses: actions/upload-pages-artifact@v4
         with:
-          path: site/
+          path: pages/
 
       - name: Deploy to GitHub Pages
         id: deployment
