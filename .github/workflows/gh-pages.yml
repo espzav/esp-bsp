@@ -7,7 +7,7 @@ on:
 
 jobs:
 
-  build:
+  build-launchpad:
     strategy:
       matrix:
         idf_ver: ["v5.4"]
@@ -39,6 +39,31 @@ jobs:
           name: built_files
           path: binaries/
 
+  release-checker:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # all git history
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run release_checker.py
+        run: |
+          pip install requests pyyaml tabulate wcwidth pytz
+          mkdir site
+          python .github/ci/release_checker.py > site/release_checker.html
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release_checker
+          path: site/
+
   deploy:
     needs: build
 
@@ -61,6 +86,20 @@ jobs:
       - name: Upload built files to gh pages
         uses: actions/upload-pages-artifact@v3
         with:
-            name: gh-pages-launchpad
-            path: binaries/
+          path: binaries/
+
+      - name: Download built files
+        uses: actions/download-artifact@v4
+        with:
+          name: release_checker
+          path: site/
+
+      - name: Upload file to gh pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
 
