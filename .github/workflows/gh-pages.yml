@@ -39,7 +39,7 @@ jobs:
           name: built_files
           path: binaries/
 
-  release-checker:
+  release-check:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
@@ -65,7 +65,9 @@ jobs:
           path: site/
 
   deploy:
-    needs: build
+    needs:
+      - build-launchpad
+      - release-check
 
     permissions:
       pages: write
